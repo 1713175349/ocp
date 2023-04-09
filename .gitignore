@@ -111,3 +111,8 @@ Local
 
 # VS Code
 .vscode/
+
+*.lmdb*
+*.csv
+*.pth
+projects/

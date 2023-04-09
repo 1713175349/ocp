@@ -15,3 +15,6 @@ from .painn.painn import PaiNN
 from .schnet import SchNetWrap as SchNet
 from .scn.scn import SphericalChannelNetwork
 from .spinconv import spinconv
+from .nequip.nequip import NequipWrap as Nequip
+from .nequip.allegro import NequipWrap as Allegro
+from .nequip.nequip_map import NequipWrap as Nequipmap

@@ -1,0 +1,27 @@
+trainer: forces
+
+dataset:
+  train:
+    src: newlmdb
+    normalize_labels: False
+    # train_on_oc20_total_energies: True
+    # #download at https://dl.fbaipublicfiles.com/opencatalystproject/data/oc22/oc20_ref.pkl
+    # oc20_ref: path/to/oc20_ref.pkl
+  val:
+    src: lmdbtest/
+
+logger: wandb
+
+task:
+  dataset: trajectory_lmdb
+  description: "Regressing to energies and forces for DFT trajectories from OCP"
+  type: regression
+  metric: mae
+  primary_metric: forces_mae
+  labels:
+    - potential energy
+  grad_input: atomic forces
+  train_on_free_atoms: True
+  eval_on_free_atoms: True
+  prediction_dtype: float32
+  strict_load: False

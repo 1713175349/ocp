@@ -255,7 +255,8 @@ class BaseTrainer(ABC):
             rank = gp_utils.get_dp_rank()
         else:
             num_replicas = distutils.get_world_size()
-            rank = distutils.get_rank()
+            rank = distutils.get_rank()    
+    
         sampler = BalancedBatchSampler(
             dataset,
             batch_size=batch_size,
@@ -266,6 +267,47 @@ class BaseTrainer(ABC):
             shuffle=shuffle,
             force_balancing=force_balancing,
         )
+        return sampler
+    
+    def get_train_sampler(self, dataset, batch_size, shuffle):
+        if "load_balancing" in self.config["optim"]:
+            balancing_mode = self.config["optim"]["load_balancing"]
+            force_balancing = True
+        else:
+            balancing_mode = "atoms"
+            force_balancing = False
+
+        if gp_utils.initialized():
+            num_replicas = gp_utils.get_dp_world_size()
+            rank = gp_utils.get_dp_rank()
+        else:
+            num_replicas = distutils.get_world_size()
+            rank = distutils.get_rank()        
+        from ocpmodels.common.data_parallel import RandomWeightBatchSampler
+        if dataset.config.get("weight_sample"):
+            print("weight sample in:",dataset.config.get("weight_sample"))
+            sampler=RandomWeightBatchSampler(
+                dataset,
+                batch_size=batch_size,
+                num_replicas=num_replicas,
+                rank=rank,
+                device=self.device,
+                weight_sampler_dict=dataset.config.get("weight_sample"),
+                mode=balancing_mode,
+                shuffle=shuffle,
+                force_balancing=force_balancing,
+            )
+        else:
+            sampler = BalancedBatchSampler(
+                dataset,
+                batch_size=batch_size,
+                num_replicas=num_replicas,
+                rank=rank,
+                device=self.device,
+                mode=balancing_mode,
+                shuffle=shuffle,
+                force_balancing=force_balancing,
+            )
         return sampler
 
     def get_dataloader(self, dataset, sampler):
@@ -290,7 +332,7 @@ class BaseTrainer(ABC):
             self.train_dataset = registry.get_dataset_class(
                 self.config["task"]["dataset"]
             )(self.config["dataset"])
-            self.train_sampler = self.get_sampler(
+            self.train_sampler = self.get_train_sampler(
                 self.train_dataset,
                 self.config["optim"]["batch_size"],
                 shuffle=True,
@@ -417,7 +459,7 @@ class BaseTrainer(ABC):
         ckpt_key_count = next(iter(checkpoint["state_dict"])).count("module")
         mod_key_count = next(iter(self.model.state_dict())).count("module")
         key_count_diff = mod_key_count - ckpt_key_count
-
+        
         if key_count_diff > 0:
             new_dict = {
                 key_count_diff * "module." + k: v
@@ -432,6 +474,7 @@ class BaseTrainer(ABC):
             new_dict = checkpoint["state_dict"]
 
         strict = self.config["task"].get("strict_load", True)
+        print("conut_diff: ",key_count_diff,strict,flush=True)
         load_state_dict(self.model, new_dict, strict=strict)
 
         if "optimizer" in checkpoint:

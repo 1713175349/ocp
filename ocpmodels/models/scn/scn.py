@@ -108,7 +108,7 @@ class SphericalChannelNetwork(BaseModel):
             )
             raise ImportError
 
-        assert e3nn.__version__ == "0.2.6"
+        assert e3nn.__version__ > "0.2.6"
 
         self.regress_forces = regress_forces
         self.use_pbc = use_pbc

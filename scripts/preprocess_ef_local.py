@@ -30,31 +30,44 @@ def write_images_to_lmdb(mp_arg):
         map_async=True,
     )
 
-    pbar = tqdm(
-        total=5000 * len(samples),
-        position=pid,
-        desc="Preprocessing data into LMDBs",
-    )
+    # pbar = tqdm(
+    #     total=5000 * len(samples),
+    #     position=pid,
+    #     desc="Preprocessing data into LMDBs",
+    # )
     for sample in samples:
-        traj_logs = open(sample, "r").read().splitlines()
+        #traj_logs = open(sample, "r").read().splitlines()
         xyz_idx = os.path.splitext(os.path.basename(sample))[0]
-        traj_path = os.path.join(args.data_path, f"{xyz_idx}.extxyz")
-        traj_frames = ase.io.read(traj_path, ":")
-
-        for i, frame in enumerate(traj_frames):
-            frame_log = traj_logs[i].split(",")
-            sid = int(frame_log[0].split("random")[1])
-            fid = int(frame_log[1].split("frame")[1])
-            data_object = a2g.convert(frame)
+        traj_path = sample #os.path.join(args.data_path, f"{xyz_idx}.extxyz")
+        if traj_path.split(".")[-1] == "traj":
+            from ase.io.trajectory import Trajectory
+            traj_frames = Trajectory(traj_path)
+        else:
+            traj_frames = ase.io.read(traj_path, ":")
+        # traj_frames = ase.io.read(traj_path, "70000:90000")
+        for i, frame in tqdm(enumerate(traj_frames)):
+            #frame_log = traj_logs[i].split(",")
+            sid = 0#int(frame_log[0].split("random")[1])
+            fid = 0#int(frame_log[1].split("frame")[1])
+            if len(frame) < 5:
+                continue
+            try:
+                data_object = a2g.convert(frame)
+            except Exception as e:
+                print(e)
+                continue
             # add atom tags
             data_object.tags = torch.LongTensor(frame.get_tags())
-            data_object.sid = sid
-            data_object.fid = fid
+            if "tags" not in frame.arrays:
+                data_object.tags+=1
+            data_object.sid = i
+            data_object.fid = i
+            # print(data_object)
             data_object.neighbors=data_object.cell_offsets.shape[0]
             # subtract off reference energy
-            if args.ref_energy and not args.test_data:
-                ref_energy = float(frame_log[2])
-                data_object.y -= ref_energy
+            # if args.ref_energy and not args.test_data:
+            #     ref_energy = float(frame_log[2])
+            #     data_object.y -= ref_energy
 
             txn = db.begin(write=True)
             txn.put(
@@ -63,8 +76,8 @@ def write_images_to_lmdb(mp_arg):
             )
             txn.commit()
             idx += 1
-            sampled_ids.append(",".join(frame_log[:2]) + "\n")
-            pbar.update(1)
+            #sampled_ids.append(",".join(frame_log[:2]) + "\n")
+            # pbar.update(1)
 
     # Save count of objects in lmdb.
     txn = db.begin(write=True)
@@ -78,7 +91,7 @@ def write_images_to_lmdb(mp_arg):
 
 
 def main(args):
-    xyz_logs = glob.glob(os.path.join(args.data_path, "*.txt"))
+    xyz_logs = glob.glob(os.path.join(args.data_path, "*"))
     if not xyz_logs:
         raise RuntimeError("No *.txt files found. Did you uncompress?")
     if args.num_workers > len(xyz_logs):
@@ -98,9 +111,15 @@ def main(args):
     # Create output directory if it doesn't exist.
     os.makedirs(os.path.join(args.out_path), exist_ok=True)
 
+    lmdb_offset=0
+    for i in range(2000):
+        lmdbpath=os.path.join(args.out_path, "data.%04d.lmdb" % i)
+        if not os.path.exists(lmdbpath):
+            lmdb_offset=i
+            break
     # Initialize lmdb paths
     db_paths = [
-        os.path.join(args.out_path, "data.%04d.lmdb" % i)
+        os.path.join(args.out_path, "data.%04d.lmdb" % (i+lmdb_offset))
         for i in range(args.num_workers)
     ]
 
@@ -127,11 +146,11 @@ def main(args):
     sampled_ids, idx = list(op[0]), list(op[1])
 
     # Log sampled image, trajectory trace
-    for j, i in enumerate(range(args.num_workers)):
-        ids_log = open(
-            os.path.join(args.out_path, "data_log.%04d.txt" % i), "w"
-        )
-        ids_log.writelines(sampled_ids[j])
+    # for j, i in enumerate(range(args.num_workers)):
+    #     ids_log = open(
+    #         os.path.join(args.out_path, "data_log.%04d.txt" % i), "w"
+    #     )
+    #     ids_log.writelines(sampled_ids[j])
 
 
 def get_parser():
