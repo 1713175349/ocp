@@ -18,3 +18,4 @@ from .spinconv import spinconv
 from .nequip.nequip import NequipWrap as Nequip
 from .nequip.allegro import NequipWrap as Allegro
 from .nequip.nequip_map import NequipWrap as Nequipmap
+from .nequip.allegro_map import NequipWrap as Allegromap

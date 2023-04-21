@@ -107,7 +107,7 @@ class ForcesTrainer(BaseTrainer):
             noddp=noddp,
         )
         
-        self.loss_mean=1.0
+        self.loss_mean=None
         self.loss_moment=0.95
         self.loss_max_percent=3.0
 
@@ -586,6 +586,8 @@ class ForcesTrainer(BaseTrainer):
 
         loss = sum(loss)
         lossf=float(loss.detach().cpu().numpy())
+        if self.loss_mean == None:
+            self.loss_mean=lossf
         if lossf>self.loss_mean*self.loss_max_percent:
             loss=loss*self.loss_mean/lossf*self.loss_max_percent
             lossf=self.loss_mean*self.loss_max_percent

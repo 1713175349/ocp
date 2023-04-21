@@ -435,7 +435,7 @@ class BaseTrainer(ABC):
         )
         if distutils.initialized() and not self.config["noddp"]:
             self.model = DistributedDataParallel(
-                self.model, device_ids=[self.device]
+                self.model, device_ids=[self.device],find_unused_parameters=True
             )
 
     def load_checkpoint(self, checkpoint_path):

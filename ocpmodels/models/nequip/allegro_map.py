@@ -202,6 +202,7 @@ class NequipWrap(nn.Module):
             "regress_forces": regress_forces,
             "num_types": 100,
             "ave_num_neighbors": ave_num_neighbors,
+            "avg_num_neighbors": ave_num_neighbors,
             "num_types": len(self.atom_map),
             "chemical_symbols": self.atom_map,
             # "invariant_layers": invariant_layers,
@@ -232,7 +233,9 @@ class NequipWrap(nn.Module):
             )
             config["irreps_edge_sh"] = irreps_edge_sh
             config["nonscalars_include_parity"] = nonscalars_include_parity
-
+        from nequip.data.transforms import TypeMapper
+        self.type_mapper=TypeMapper(chemical_symbols=self.atom_map)
+        
         layers = {
             # -- Encode --
             # Get various edge invariants
@@ -283,6 +286,10 @@ class NequipWrap(nn.Module):
         self.model = SequentialGraphNetwork.from_parameters(
             shared_params=config, layers=layers
         )
+        print("####################config############################")
+        for k,v in config.items():
+            print(f"{k}: {v}")
+        print("####################config############################")
 
     @staticmethod
     def convert_ocp(data):
@@ -291,16 +298,20 @@ class NequipWrap(nn.Module):
             edge_index=data.edge_index,
             edge_cell_shift=data.cell_offsets.float(),
             cell=data.cell,
-            atom_types=data.atomic_numbers.long(),
+            #atom_types=data.atomic_numbers.long(),
+            atomic_numbers=data.atomic_numbers.long(),
             batch=data.batch,
             edge_vectors=data.edge_vec,
         )
         data = AtomicData.to_AtomicDataDict(data)
-
+        
         return data
 
     def _forward(self, data):
+        data = self.type_mapper(data)
+        # print(data["atom_types"])
         return self.model(data)
+
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
