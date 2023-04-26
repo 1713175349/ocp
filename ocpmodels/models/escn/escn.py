@@ -85,7 +85,7 @@ class eSCN(BaseModel):
         distance_function="gaussian",
         basis_width_scalar=1.0,
         distance_resolution=0.02,
-        show_timing_info=True,
+        show_timing_info=False,
     ):
         super().__init__()
 
@@ -118,7 +118,7 @@ class eSCN(BaseModel):
         self.sphere_channels_all = self.num_resolutions * self.sphere_channels
         self.basis_width_scalar = basis_width_scalar
         self.distance_function = distance_function
-        self.device = torch.cuda.current_device()
+        self.device = "cuda"#torch.cuda.current_device()
 
         # variables used for display purposes
         self.counter = 0
@@ -204,20 +204,24 @@ class eSCN(BaseModel):
             )
 
         # Create a roughly evenly distributed point sampling of the sphere for the output blocks
-        self.sphere_points = CalcSpherePoints(
-            self.num_sphere_samples, self.device
-        ).detach()
+        self.sphere_points = nn.Parameter(
+            CalcSpherePoints(self.num_sphere_samples,device=self.device), requires_grad=False
+        )
 
         # For each spherical point, compute the spherical harmonic coefficient weights
         self.sphharm_weights = []
         for i in range(self.num_resolutions):
             self.sphharm_weights.append(
-                o3.spherical_harmonics(
-                    torch.arange(0, self.lmax_list[i] + 1).tolist(),
-                    self.sphere_points,
-                    False,
-                ).detach()
+                nn.Parameter(
+                    o3.spherical_harmonics(
+                        torch.arange(0, self.lmax_list[i] + 1).tolist(),
+                        self.sphere_points,
+                        False,
+                    ),
+                    requires_grad=False,
+                )
             )
+        self.sphharm_weights = nn.ParameterList(self.sphharm_weights)
 
     @conditional_grad(torch.enable_grad())
     def forward(self, data):
@@ -267,7 +271,8 @@ class eSCN(BaseModel):
             self.device,
             self.dtype,
         )
-
+        import os
+        #print("main: ",os.getpid(),self.device)
         offset_res = 0
         offset = 0
         # Initialize the l=0,m=0 coefficients for each resolution

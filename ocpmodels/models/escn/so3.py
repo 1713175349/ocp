@@ -245,6 +245,7 @@ class SO3_Embedding(torch.nn.Module):
         for i in range(self.num_resolutions):
             num_coefficients = int((self.lmax_list[i] + 1) ** 2)
             embedding_i = self.embedding[:, offset : offset + num_coefficients]
+            #print("embeding device: ",self.embedding.device,self.device)
             embedding_rotate = torch.cat(
                 [
                     embedding_rotate,
@@ -418,6 +419,7 @@ class SO3_Rotation(torch.nn.Module):
     def rotate(self, embedding, out_lmax, out_mmax):
         out_mask = self.mapping.coefficient_idx(out_lmax, out_mmax)
         wigner = self.wigner[:, out_mask, :]
+        #print("device: ",wigner.device,embedding.device,self.device)
         return torch.bmm(wigner, embedding)
 
     # Rotate the embedding by the inverse of the rotation matrix
