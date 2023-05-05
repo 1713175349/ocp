@@ -242,6 +242,7 @@ class GemNetOC(BaseModel):
         **kwargs,  # backwards compatibility with deprecated arguments
     ):
         super().__init__()
+        self.return_atom_energy=True
         if len(kwargs) > 0:
             logging.warning(f"Unrecognized arguments: {list(kwargs.keys())}")
         self.num_targets = num_targets
@@ -1218,7 +1219,7 @@ class GemNetOC(BaseModel):
         )
 
     @conditional_grad(torch.enable_grad())
-    def forward(self, data):
+    def forward(self, data, return_atom_energy=False):
         pos = data.pos
         batch = data.batch
         atomic_numbers = data.atomic_numbers.long()
@@ -1307,6 +1308,8 @@ class GemNetOC(BaseModel):
                 F_st = self.out_forces(x_F.float())
 
         nMolecules = torch.max(batch) + 1
+        
+        atom_energies=E_t
         if self.extensive:
             E_t = scatter_det(
                 E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
@@ -1349,9 +1352,13 @@ class GemNetOC(BaseModel):
 
             E_t = E_t.squeeze(1)  # (num_molecules)
             F_t = F_t.squeeze(1)  # (num_atoms, 3)
+            if return_atom_energy:
+                return E_t, F_t, atom_energies
             return E_t, F_t
         else:
             E_t = E_t.squeeze(1)  # (num_molecules)
+            if return_atom_energy:
+                return E_t, F_t, atom_energies
             return E_t
 
     @property

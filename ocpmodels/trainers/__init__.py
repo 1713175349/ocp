@@ -13,3 +13,4 @@ from .base_trainer import BaseTrainer
 from .energy_trainer import EnergyTrainer
 from .forces_trainer import ForcesTrainer
 from .forces_trainer_controller import ForcesTrainer as ForcesTrainerController
+from .energies_forces_trainer_controller import ForcesTrainer as EnergiesTrainer

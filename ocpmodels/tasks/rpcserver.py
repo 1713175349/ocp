@@ -63,24 +63,36 @@ def atoms2data(atoms:Atoms):
     return Batch.from_data_list([d0])
     
 class Ocpwarpcalc(Calculator):
-    implemented_properties = ["energy", "free_energy", "forces"]
+    implemented_properties = ["energy", "free_energy", "forces","energies"]
     def __init__(self, net:torch.nn.Module,label="OcpNet", **kwargs):
         super().__init__(label=label, **kwargs)
         self.net=net
         self.device=next(self.net.parameters()).device
+        import inspect
+        print(inspect.getfullargspec(self.net.forward))
+        if hasattr(self.net,"return_atom_energy") and getattr(self.net,"return_atom_energy",None) == True :
+            self.is_atomic_energy=True
+        else:
+            self.is_atomic_energy=False
         
     def calculate(self, atoms=None, properties:List[str] = ["energy", "forces"],system_changes: List[str] = all_changes):
         self.atoms = atoms
         if atoms is not None:
             self.atoms = atoms.copy()
         data=newatoms2data(self.atoms).to(self.device)
+        # print("self.is_atomic_energy  ",self.is_atomic_energy)
         # print("data: ",data,data.batch)
-        e,f=self.net(data)
+        if self.is_atomic_energy:
+            e,f,es=self.net.forward(data,return_atom_energy=True)
+        else:
+            e,f=self.net(data)
         e=e.detach().cpu().numpy()[0]
         f=f.detach().cpu().numpy()
         # print(f)
         self.results["energy"]=e
-        self.results["forces"]=f    
+        self.results["forces"]=f
+        if self.is_atomic_energy:
+            self.results["energies"]=es.detach().cpu().numpy().reshape(-1)
         
 def rpc_server_run(calc,address='tcp://0.0.0.0:18953'):
     from pyrpc import Server
@@ -123,9 +135,11 @@ class RpcCalcsTask(BaseTask):
         #     results_file=results_file,
         #     disable_tqdm=self.config.get("hide_eval_progressbar", False),
         # )
+        
         self.trainer.model.eval()
+        print("type: ",type(self.trainer.model.module))
         calc=Ocpwarpcalc(self.trainer.model.module)
-        print(self.config)
+        # print(self.config)
         rpc_server_run(calc,address=self.config["address"])
         
 

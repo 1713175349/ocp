@@ -64,6 +64,9 @@ def write_images_to_lmdb(mp_arg):
             data_object.fid = i
             # print(data_object)
             data_object.neighbors=data_object.cell_offsets.shape[0]
+            
+            if "energies" in frame.calc.results:
+                data_object.energies=torch.Tensor(frame.calc.results["energies"].reshape(-1,1))
             # subtract off reference energy
             # if args.ref_energy and not args.test_data:
             #     ref_energy = float(frame_log[2])

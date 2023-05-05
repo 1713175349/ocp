@@ -26,7 +26,7 @@ from ocpmodels.modules.scaling.util import ensure_fitted
 from ocpmodels.trainers.base_trainer import BaseTrainer
 
 
-@registry.register_trainer("forcescontroller")
+@registry.register_trainer("energiesforcescontroller")
 class ForcesTrainer(BaseTrainer):
     """
     Trainer class for the Structure to Energy & Force (S2EF) and Initial State to
@@ -448,7 +448,7 @@ class ForcesTrainer(BaseTrainer):
     def _forward(self, batch_list):
         # forward pass.
         if self.config["model_attributes"].get("regress_forces", True):
-            out_energy, out_forces = self.model(batch_list)
+            out_energy, out_forces,out_energies = self.model(batch_list,return_atom_energy=True)
         else:
             out_energy = self.model(batch_list)
 
@@ -457,6 +457,7 @@ class ForcesTrainer(BaseTrainer):
 
         out = {
             "energy": out_energy,
+            "energies": out_energies
         }
 
         if self.config["model_attributes"].get("regress_forces", True):
@@ -467,16 +468,30 @@ class ForcesTrainer(BaseTrainer):
     def _compute_loss(self, out, batch_list,return_dict=False):
         loss = []
 
-        # Energy loss.
-        energy_target = torch.cat(
-            [batch.y.to(self.device) for batch in batch_list], dim=0
-        )
-        if self.normalizer.get("normalize_labels", False):
-            energy_target = self.normalizers["target"].norm(energy_target)
-        energy_mult = self.config["optim"].get("energy_coefficient", 1)
-        loss.append(
-            energy_mult * self.loss_fn["energy"](out["energy"], energy_target)
-        )
+        if "energies" not in out:
+            # Energy loss.
+            energy_target = torch.cat(
+                [batch.y.to(self.device) for batch in batch_list], dim=0
+            )
+            if self.normalizer.get("normalize_labels", False):
+                energy_target = self.normalizers["target"].norm(energy_target)
+            energy_mult = self.config["optim"].get("energy_coefficient", 1)
+            loss.append(
+                energy_mult * self.loss_fn["energy"](out["energy"], energy_target)
+            )
+        else:
+            # Energies loss
+            energies_target = torch.cat(
+                [batch.energies.to(self.device) for batch in batch_list], dim=0
+            )
+            # print("energy target",energies_target.shape)
+            if self.normalizer.get("normalize_labels", False):
+                energies_target = self.normalizers["target"].norm(energies_target)
+            energy_mult = self.config["optim"].get("energy_coefficient", 1)
+            loss.append(
+                energy_mult * self.loss_fn["energy"](out["energies"], energies_target)
+            )
+        
 
         # Force loss.
         if self.config["model_attributes"].get("regress_forces", True):
