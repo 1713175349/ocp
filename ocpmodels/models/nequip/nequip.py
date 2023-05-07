@@ -100,6 +100,9 @@ class NequipWrap(nn.Module):
         **convolution_args,
     ):
         super().__init__()
+        
+        self.return_atom_energy = True
+        
         self.use_pbc = use_pbc
         self.otf_graph = otf_graph
         self.regress_forces = regress_forces
@@ -207,7 +210,7 @@ class NequipWrap(nn.Module):
         return self.model(data)
 
     @conditional_grad(torch.enable_grad())
-    def forward(self, data):
+    def forward(self, data,return_atom_energy=False):
         if self.regress_forces:
             data.pos.requires_grad_(True)
 
@@ -252,7 +255,8 @@ class NequipWrap(nn.Module):
         data.edge_vec = edge_vec
 
         data = self.convert_ocp(data)
-        energy = self._forward(data)["total_energy"]
+        out=self._forward(data)
+        energy = out["total_energy"]
 
         if self.regress_forces and self.direct_forces:
             forces = self.model(data)["per_atom_force"]
@@ -267,6 +271,8 @@ class NequipWrap(nn.Module):
                     create_graph=True,
                 )[0]
             )
+            if return_atom_energy:
+                return energy, forces, out["atomic_energy"]
             return energy, forces
         else:
             return energy

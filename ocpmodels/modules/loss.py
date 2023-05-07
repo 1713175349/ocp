@@ -35,6 +35,8 @@ class AtomwiseL2Loss(nn.Module):
         assert natoms.shape[0] == input.shape[0] == target.shape[0]
         assert len(natoms.shape) == 1  # (nAtoms, )
 
+        # print("l2 atomwise shapes: ",natoms, input.shape, target.shape)
+        
         dists = torch.norm(input - target, p=2, dim=-1)
         loss = natoms * dists
 
