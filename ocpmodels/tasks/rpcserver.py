@@ -112,7 +112,8 @@ def rpc_server_run(calc,address='tcp://0.0.0.0:18953'):
         s = Server(HelloRPC(),address=address)
 
         print("######ready####")
-        print("address: ",address)
+        import zmq
+        print("address: ",address,s._socket.getsockopt(zmq.LAST_ENDPOINT))
 
         s.run()
     except Exception as e:
