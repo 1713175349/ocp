@@ -255,8 +255,7 @@ class BaseTrainer(ABC):
             rank = gp_utils.get_dp_rank()
         else:
             num_replicas = distutils.get_world_size()
-            rank = distutils.get_rank()    
-    
+            rank = distutils.get_rank()
         sampler = BalancedBatchSampler(
             dataset,
             batch_size=batch_size,
@@ -435,7 +434,7 @@ class BaseTrainer(ABC):
         )
         if distutils.initialized() and not self.config["noddp"]:
             self.model = DistributedDataParallel(
-                self.model, device_ids=[self.device],find_unused_parameters=True
+                self.model, device_ids=[self.device]
             )
 
     def load_checkpoint(self, checkpoint_path):
@@ -459,7 +458,7 @@ class BaseTrainer(ABC):
         ckpt_key_count = next(iter(checkpoint["state_dict"])).count("module")
         mod_key_count = next(iter(self.model.state_dict())).count("module")
         key_count_diff = mod_key_count - ckpt_key_count
-        
+
         if key_count_diff > 0:
             new_dict = {
                 key_count_diff * "module." + k: v

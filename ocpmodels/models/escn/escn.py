@@ -271,8 +271,7 @@ class eSCN(BaseModel):
             self.device,
             self.dtype,
         )
-        import os
-        #print("main: ",os.getpid(),self.device)
+
         offset_res = 0
         offset = 0
         # Initialize the l=0,m=0 coefficients for each resolution
