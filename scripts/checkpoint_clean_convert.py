@@ -10,7 +10,7 @@ out={}
 #         out[k]=v
         
 for k,v in  checkpoint.items():
-    if k in ["state_dict","normalizers",'amp']:
+    if k in ["state_dict",'amp']:
         out[k]=v
 
 torch.save(out,sys.argv[2])

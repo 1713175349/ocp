@@ -160,7 +160,7 @@ class ForcesTrainer(BaseTrainer):
         results_file=None,
         disable_tqdm=False,
     ):
-        ensure_fitted(self._unwrapped_model)
+        ensure_fitted(self._unwrapped_model, warn=True)
 
         if distutils.is_master() and not disable_tqdm:
             logging.info("Predicting on test.")
@@ -360,8 +360,7 @@ class ForcesTrainer(BaseTrainer):
                 self.metrics = self.evaluator.update(
                     "loss", loss.item() / scale, self.metrics
                 )
-                
-                
+
                 # Log metrics.
                 log_dict = {k: self.metrics[k]["metric"] for k in self.metrics}
                 log_dict.update(

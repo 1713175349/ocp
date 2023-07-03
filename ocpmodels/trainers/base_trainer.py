@@ -494,7 +494,7 @@ class BaseTrainer(ABC):
             )
             load_scales_compat(self._unwrapped_model, scale_dict)
 
-        for key in checkpoint["normalizers"]:
+        for key in checkpoint.get("normalizers",{}):
             if key in self.normalizers:
                 self.normalizers[key].load_state_dict(
                     checkpoint["normalizers"][key]
@@ -553,11 +553,48 @@ class BaseTrainer(ABC):
                 **self.config["optim"].get("optimizer_params", {}),
             )
         else:
-            self.optimizer = optimizer(
-                params=self.model.parameters(),
-                lr=self.config["optim"]["lr_initial"],
-                **self.config["optim"].get("optimizer_params", {}),
-            )
+            if self.config["optim"].get("parameter_lr",None) == None:
+                self.optimizer = optimizer(
+                    params=self.model.parameters(),
+                    lr=self.config["optim"]["lr_initial"],
+                    **self.config["optim"].get("optimizer_params", {}),
+                )
+            else:  
+                """
+                parameter_lr:
+                    asf: 0.2
+                    asf1: 0.1
+                """ 
+                parameter_list=[]
+                specialed_para=self.config["optim"].get("parameter_lr",{})
+                lr=self.config["optim"]["lr_initial"]
+                parameter_group={}
+                parameter_group_name={}
+                for name, param in self.model.named_parameters():
+                    p_lr=lr
+                    for k,v in specialed_para.items():
+                        if k in name:
+                            p_lr=p_lr*v
+                            break
+                        
+                    # if p_lr/lr<1e-6:
+                    #     continue
+                    
+                    if p_lr not in parameter_group:
+                        parameter_group[p_lr]={'params': [], 'lr': p_lr}
+                        parameter_group_name[p_lr]={'params': [], 'lr': p_lr}
+                    parameter_group[p_lr]['params'].append(param)
+                    parameter_group_name[p_lr]['params'].append(name)
+                parameter_list=list(parameter_group.values())
+                print("learnrate parameters:",list(parameter_group_name.values()))
+                self.optimizer = optimizer(
+                    parameter_list,
+                    lr=self.config["optim"]["lr_initial"],
+                    **self.config["optim"].get("optimizer_params", {}),
+                )
+                            
+                            
+                
 
     def load_extras(self):
         self.scheduler = LRScheduler(self.optimizer, self.config["optim"])

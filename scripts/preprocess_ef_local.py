@@ -45,7 +45,7 @@ def write_images_to_lmdb(mp_arg):
         else:
             traj_frames = ase.io.read(traj_path, ":")
         # traj_frames = ase.io.read(traj_path, "70000:90000")
-        for i, frame in tqdm(enumerate(traj_frames)):
+        for i, frame in tqdm(enumerate(traj_frames),total=len(traj_frames)):
             #frame_log = traj_logs[i].split(",")
             sid = 0#int(frame_log[0].split("random")[1])
             fid = 0#int(frame_log[1].split("frame")[1])
@@ -63,7 +63,8 @@ def write_images_to_lmdb(mp_arg):
             data_object.sid = i
             data_object.fid = i
             # print(data_object)
-            data_object.neighbors=data_object.cell_offsets.shape[0]
+            if a2g.r_edges:
+                data_object.neighbors=data_object.cell_offsets.shape[0]
             
             if "energies" in frame.calc.results:
                 data_object.energies=torch.Tensor(frame.calc.results["energies"].reshape(-1,1))
@@ -110,7 +111,7 @@ def main(args):
         r_distances=False,
         r_edges=args.get_edges,
     )
-
+    
     # Create output directory if it doesn't exist.
     os.makedirs(os.path.join(args.out_path), exist_ok=True)
 
