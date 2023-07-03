@@ -441,7 +441,10 @@ def build_config(args, args_override):
     config["submit"] = args.submit
     config["summit"] = args.summit
     # Distributed
-    config["local_rank"] = args.local_rank
+    lockrank=args.local_rank
+    import os
+    lockrank=os.environ.get("LOCAL_RANK",lockrank)
+    config["local_rank"] = lockrank
     config["distributed_port"] = args.distributed_port
     config["world_size"] = args.num_nodes * args.num_gpus
     config["distributed_backend"] = args.distributed_backend
