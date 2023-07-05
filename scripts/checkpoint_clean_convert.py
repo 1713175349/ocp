@@ -1,7 +1,7 @@
 import torch
 import sys
 from collections import OrderedDict
-checkpoint=torch.load(sys.argv[1])
+checkpoint=torch.load(sys.argv[1], map_location=torch.device('cpu'))
 out={}
 
 

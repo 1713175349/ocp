@@ -443,6 +443,82 @@ class ForcesTrainer(BaseTrainer):
             self.val_dataset.close_db()
         if self.config.get("test_dataset", False):
             self.test_dataset.close_db()
+            
+    def train_new_data(self, newdata_loader,nepoch:int=1,max_steps=-1,disable_eval_tqdm=False):
+        ensure_fitted(self._unwrapped_model, warn=True)
+
+        eval_every = self.config["optim"].get(
+            "eval_every", len(self.train_loader)
+        )
+        checkpoint_every = self.config["optim"].get(
+            "checkpoint_every", eval_every
+        )
+        primary_metric = self.config["task"].get(
+            "primary_metric", self.evaluator.task_primary_metric[self.name]
+        )
+        if (
+            not hasattr(self, "primary_metric")
+            or self.primary_metric != primary_metric
+        ):
+            self.best_val_metric = 1e9 if "mae" in primary_metric else -1.0
+        else:
+            primary_metric = self.primary_metric
+        self.metrics = {}
+
+        # Calculate start_epoch from step instead of loading the epoch number
+        # to prevent inconsistencies due to different batch size in checkpoint.
+        step=0
+        for epoch_int in range(
+            nepoch
+        ):
+            train_loader_iter=iter(newdata_loader)
+            if max_steps>0 and step>max_steps:
+                break
+            for i in range(0, len(newdata_loader)):
+                step +=1
+                
+                if max_steps>0 and step>max_steps:
+                    break
+                
+                self.model.train()
+
+                # Get a batch.
+                batch = next(train_loader_iter)
+
+                # Forward, loss, backward.
+                with torch.cuda.amp.autocast(enabled=self.scaler is not None):
+                    out = self._forward(batch)
+                    loss,loss_dict = self._compute_loss(out, batch,return_dict=True)
+                loss = self.scaler.scale(loss) if self.scaler else loss
+                self._backward(loss)
+                scale = self.scaler.get_scale() if self.scaler else 1.0
+
+                # Compute metrics.
+                self.metrics = self._compute_metrics(
+                    out,
+                    batch,
+                    self.evaluator,
+                    self.metrics,
+                )
+                self.metrics = self.evaluator.update(
+                    "loss", loss.item() / scale, self.metrics
+                )
+
+                # Log metrics.
+                log_dict = {k: self.metrics[k]["metric"] for k in self.metrics}
+                log_dict.update(
+                    {
+                        "lr": self.scheduler.get_lr(),
+                        "epoch": self.epoch,
+                        "step": self.step,
+                    }
+                )
+                log_dict.update(loss_dict)
+                out_log=""
+                for k,v in log_dict.items():
+                    out_log+=f"{k}:{v} "
+                print(out_log)
+            torch.cuda.empty_cache()
 
     def _forward(self, batch_list):
         # forward pass.

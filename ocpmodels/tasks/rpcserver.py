@@ -86,8 +86,8 @@ class Ocpwarpcalc(Calculator):
             e,f,es=self.net.forward(data,return_atom_energy=True)
         else:
             e,f=self.net(data)
-        e=e.detach().cpu().numpy()[0]
-        f=f.detach().cpu().numpy()
+        e=e.detach().cpu().numpy().reshape(-1)[0]
+        f=f.detach().cpu().numpy().reshape(-1,3)
         # print(f)
         self.results["energy"]=e
         self.results["forces"]=f
