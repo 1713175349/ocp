@@ -122,7 +122,8 @@ class LmdbDataset(Dataset):
 
         if self.transform is not None:
             data_object = self.transform(data_object)
-
+        data_object.datasetidx=idx
+        
         return data_object
 
     def connect_db(self, lmdb_path=None):

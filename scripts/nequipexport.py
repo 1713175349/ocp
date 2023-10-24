@@ -1,4 +1,3 @@
-import imp
 import torch
 import sys
 from collections import OrderedDict

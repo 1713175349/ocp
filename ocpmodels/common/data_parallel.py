@@ -393,7 +393,7 @@ class RandomWeightBatchSampler(Sampler):
         num_replicas,
         rank,
         device,
-        weight_sampler_dict:dict={},
+        weight_sampler_dict={},
         mode: Union[str, bool] = "atoms",
         shuffle=True,
         drop_last=False,
@@ -431,10 +431,13 @@ class RandomWeightBatchSampler(Sampler):
         z[1:] -= z[:-1].copy()
         samplelens=z.tolist()
         from torch.utils.data.sampler import WeightedRandomSampler
-        assert weight_sampler_dict.get("weights") != None and len(weight_sampler_dict.get("weights")) >= len(samplelens)
-        assert weight_sampler_dict.get("num_samples") != None
-        weights=np.hstack([np.ones(i)*j/i for i,j in zip(samplelens,weight_sampler_dict.get("weights"))])
-        self.weight_sampler=WeightedRandomSampler(weights,num_samples=weight_sampler_dict.get("num_samples"),replacement=True)
+        if isinstance(weight_sampler_dict,dict):
+            assert weight_sampler_dict.get("weights") != None and len(weight_sampler_dict.get("weights")) >= len(samplelens)
+            assert weight_sampler_dict.get("num_samples") != None
+            weights=np.hstack([np.ones(i)*j/i for i,j in zip(samplelens,weight_sampler_dict.get("weights"))])
+            self.weight_sampler=WeightedRandomSampler(weights,num_samples=weight_sampler_dict.get("num_samples"),replacement=True)
+        else:
+            self.weight_sampler=WeightedRandomSampler(weight_sampler_dict,num_samples=int(np.sum(samplelens)),replacement=True)
         self.single_sampler = DistributedSamplerWrapper(
             self.weight_sampler,
             num_replicas=num_replicas,

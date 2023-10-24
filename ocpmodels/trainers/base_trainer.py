@@ -283,7 +283,7 @@ class BaseTrainer(ABC):
             num_replicas = distutils.get_world_size()
             rank = distutils.get_rank()        
         from ocpmodels.common.data_parallel import RandomWeightBatchSampler
-        if dataset.config.get("weight_sample"):
+        if ("weight_sample") in dataset.config:
             print("weight sample in:",dataset.config.get("weight_sample"))
             sampler=RandomWeightBatchSampler(
                 dataset,
@@ -560,6 +560,7 @@ class BaseTrainer(ABC):
                     **self.config["optim"].get("optimizer_params", {}),
                 )
             else:  
+                # 指定参数的学习率，只要左侧包含在参数的名称中就可
                 """
                 parameter_lr:
                     asf: 0.2

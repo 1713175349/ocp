@@ -32,6 +32,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+from select import select
 import torch
 
 try:
@@ -65,38 +66,20 @@ from ocpmodels.common.utils import (
 )
 
 
-@registry.register_model("nequip")
+@registry.register_model("nequipmapload")
 class NequipWrap(nn.Module):
     def __init__(
         self,
         num_atoms,  # not used
         bond_feat_dim,  # not used
         num_targets,  # not used
-        num_basis=8,  # number of basis functions used in radial basis
-        BesselBasis_trainable=True,  # train bessel weights
-        PolynomialCutoff_p=6.0,  # p-exponent used in polynomial cutoff
-        # irreps used in hidden layer of output block
-        conv_to_output_hidden_irreps_out="8x0e",
-        # irreps for the chemical embedding of species
-        chemical_embedding_irreps_out="8x0e",
-        # irreps used for hidden features. Default is lmax=1, with even and odd parities
-        feature_irreps_hidden="8x0o + 8x0e + 8x1o + 8x1e",
-        # irreps of the spherical harmonics used for edges. If single integer, full SH up to lmax=that_integer
-        irreps_edge_sh="0e + 1o",
-        nonlinearity_type="gate",
-        num_layers=3,  # number of interaction blocks
-        invariant_layers=2,  # number of radial layers
-        invariant_neurons=64,  # number of hidden neurons in radial function
-        use_sc=True,  # use self-connection or not
+        load_path='',
         cutoff=4.0,
-        resnet=False,
         regress_forces=False,
         direct_forces=False,
         otf_graph=True,
         use_pbc=False,
         max_neighbors=50,
-        ave_num_neighbors=None,
-        add_per_species_rescale=False,  # per species/atom scaling
         **convolution_args,
     ):
         super().__init__()
@@ -109,95 +92,15 @@ class NequipWrap(nn.Module):
         self.direct_forces = direct_forces
         self.cutoff = cutoff
         self.max_neighbors = max_neighbors
-        self.ave_num_neighbors = ave_num_neighbors
-        self.add_per_species_rescale = add_per_species_rescale
-        config = {
-            "BesselBasis_trainable": BesselBasis_trainable,
-            "PolynomialCutoff_p": PolynomialCutoff_p,
-            "conv_to_output_hidden_irreps_out": conv_to_output_hidden_irreps_out,
-            "chemical_embedding_irreps_out": chemical_embedding_irreps_out,
-            "feature_irreps_hidden": feature_irreps_hidden,
-            "irreps_edge_sh": irreps_edge_sh,
-            "nonlinearity_type": nonlinearity_type,
-            "num_basis": num_basis,
-            "num_layers": num_layers,
-            "r_max": cutoff,
-            "resnet": resnet,
-            "regress_forces": regress_forces,
-            "num_types": 100,
-            "invariant_layers": invariant_layers,
-            "invariant_neurons": invariant_neurons,
-            "use_sc": use_sc,
-            **convolution_args,
-        }
-        layers = {
-            # -- Encode --
-            "one_hot": OneHotAtomEncoding,
-            "spharm_edges": SphericalHarmonicEdgeAttrs,
-            "radial_basis": RadialBasisEdgeEncoding,
-            # -- Embed features --
-            "chemical_embedding": AtomwiseLinear,
-        }
-
-        # add convnet layers
-        # insertion preserves order
-        for layer_i in range(num_layers):
-            layers[f"layer{layer_i}_convnet"] = ConvNetLayer
-
-        layers.update(
-            {
-                # -- output block --
-                "conv_to_output_hidden": AtomwiseLinear,
-                "output_hidden_to_scalar": (
-                    AtomwiseLinear,
-                    dict(
-                        irreps_out="1x0e",
-                        out_field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
-                    ),
-                ),
-            }
-        )
-
-        if self.direct_forces:
-            layers["output_hidden_to_vect"] = (
-                # add direct force to output block
-                AtomwiseLinear,
-                dict(
-                    irreps_out="1x1o",
-                    out_field="per_atom_force",
-                ),
-            )
-
-        if add_per_species_rescale:
-            # type_names must be set in the config
-            layers["per_species_rescale"] = (
-                PerSpeciesScaleShift,
-                dict(
-                    field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
-                    out_field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
-                ),
-            )
-
-        layers["total_energy_sum"] = (
-            AtomwiseReduce,
-            dict(
-                reduce="sum",
-                field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
-                out_field=AtomicDataDict.TOTAL_ENERGY_KEY,
-            ),
-        )
-
-        print("config: ",config)
-        print("###"*20)
-        import yaml,io
-        tmpio=io.StringIO()
-        yaml.dump(config,tmpio)
-        print(tmpio.getvalue())
-        print("###"*20)
         
-        self.model = SequentialGraphNetwork.from_parameters(
-            shared_params=config, layers=layers
-        )
+        
+        from nequip.train import Trainer
+        self.model,self.model_config = Trainer.load_model_from_training_session(load_path)
+        self.model=self.model.func
+        self.atom_map=self.model_config['type_names']
+        from nequip.data.transforms import TypeMapper
+        self.type_mapper=TypeMapper(chemical_symbols=self.atom_map)
+        
 
     @staticmethod
     def convert_ocp(data):
@@ -206,15 +109,18 @@ class NequipWrap(nn.Module):
             edge_index=data.edge_index,
             edge_cell_shift=data.cell_offsets.float(),
             cell=data.cell,
-            atom_types=data.atomic_numbers.long(),
+            #atom_types=data.atomic_numbers.long(),
+            atomic_numbers=data.atomic_numbers.long(),
             batch=data.batch,
             edge_vectors=data.edge_vec,
         )
         data = AtomicData.to_AtomicDataDict(data)
-
+        
         return data
 
     def _forward(self, data):
+        data = self.type_mapper(data)
+        # print(data["atom_types"])
         return self.model(data)
 
     @conditional_grad(torch.enable_grad())

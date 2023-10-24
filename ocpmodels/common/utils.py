@@ -649,7 +649,8 @@ def radius_graph_pbc(
         rep_a3 = torch.ceil(radius * inv_min_dist_a3)
     else:
         rep_a3 = data.cell.new_zeros(1)
-
+    rep_a1=rep_a1.detach().cpu().numpy();rep_a2=rep_a2.detach().cpu().numpy();rep_a3=rep_a3.detach().cpu().numpy()
+    #from IPython import embed;print("准备打开交互式会话");embed();print("交互式会话结束")
     # Take the max over all images for uniformity. This is essentially padding.
     # Note that this can significantly increase the number of computed distances
     # if the required repetitions are very different between images

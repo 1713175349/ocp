@@ -1232,7 +1232,33 @@ class GemNetOC(BaseModel):
 
         if self.regress_forces and not self.direct_forces:
             pos.requires_grad_(True)
-
+        # print("new mode",flush=True)
+        # 添加stress
+        has_cell=True
+        #from IPython import embed;print("准备打开交互式会话");embed();print("交互式会话结束")
+        if has_cell:
+            cell=data.cell
+            batch=data.batch
+            num_batch=int(batch.max().cpu().item()) + 1
+            displacement = torch.zeros(
+                (num_batch, 3, 3),
+                dtype=pos.dtype,
+                device=pos.device,
+            )
+            displacement.requires_grad_(True)
+            symmetric_displacement = 0.5 * (displacement + displacement.transpose(-1, -2))
+            pos0=pos
+            pos= pos + torch.bmm(
+                pos.unsqueeze(-2), symmetric_displacement[batch]
+            ).squeeze(-2)
+            cell=cell + torch.bmm(
+                    cell, symmetric_displacement
+                )
+            #from IPython import embed;print("准备打开交互式会话");embed();print("交互式会话结束")
+            data.pos=pos
+            data.cell=cell
+        
+        
         (
             main_graph,
             a2a_graph,
@@ -1353,7 +1379,28 @@ class GemNetOC(BaseModel):
                     reduce="add",
                 )  # (nAtoms, num_targets, 3)
             else:
-                F_t = self.force_scaler.calc_forces_and_update(E_t, pos)
+                
+                # from IPython import embed;print("准备打开交互式会话");embed();print("交互式会话结束")
+                #F_t = self.force_scaler.calc_forces_and_update(E_t, pos0)
+                if has_cell:
+                    grads = torch.autograd.grad(
+                        [E_t.sum()],
+                        [pos0,displacement],
+                        create_graph=self.training,  # needed to allow gradients of this output during training
+                    )
+                    volume = torch.einsum(
+                    "zi,zi->z",
+                    cell[:, 0, :],
+                    torch.cross(cell[:, 1, :], cell[:, 2, :], dim=1),
+                ).unsqueeze(-1)
+                    virial=grads[1]
+                    forces=grads[0]
+                    F_t = torch.neg(forces)
+                    stress = virial / volume.view(-1, 1, 1)
+                    print(stress)
+                else:
+                    F_t = self.force_scaler.calc_forces_and_update(E_t, pos0)
+                
 
             E_t = E_t.squeeze(1)  # (num_molecules)
             F_t = F_t.squeeze(1)  # (num_atoms, 3)

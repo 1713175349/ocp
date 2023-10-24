@@ -133,6 +133,7 @@ class NequipWrap(nn.Module):
             "invariant_layers": invariant_layers,
             "invariant_neurons": invariant_neurons,
             "use_sc": use_sc,
+            "avg_num_neighbors": self.ave_num_neighbors,
             **convolution_args,
         }
         from nequip.data.transforms import TypeMapper
@@ -198,8 +199,15 @@ class NequipWrap(nn.Module):
             shared_params=config, layers=layers
         )
         print("####################config############################")
-        for k,v in config.items():
-            print(f"{k}: {v}")
+        # for k,v in config.items():
+        #     print(f"{k}: {v}")
+        print("config: ",config)
+        print("###"*20)
+        import yaml,io
+        tmpio=io.StringIO()
+        yaml.dump(config,tmpio)
+        print(tmpio.getvalue())
+        print("###"*20)
         print("####################config############################")
 
     @staticmethod

@@ -136,11 +136,24 @@ class RpcCalcsTask(BaseTask):
         #     results_file=results_file,
         #     disable_tqdm=self.config.get("hide_eval_progressbar", False),
         # )
+        global a2g
+        a2g = AtomsToGraphs(
+        max_neigh=self.config['model']['max_neighbors'],
+        radius=self.config['model']['cutoff'],
+        r_energy=False,
+        r_forces=False,
+        r_fixed=True,
+        r_distances=False,
+        r_edges=True,
+    )
         
         self.trainer.model.eval()
         print("type: ",type(self.trainer.model.module))
         calc=Ocpwarpcalc(self.trainer.model.module)
         # print(self.config)
-        rpc_server_run(calc,address=self.config["address"])
+        print("max_neighbor: ",self.config['model']['max_neighbors'])
+        print("cutoff: ",self.config['model']['cutoff'])
+        rpc_server_run(calc,address=self.config.get("address","tcp://0.0.0.0:0"))
+        
         
 
