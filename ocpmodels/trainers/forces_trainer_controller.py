@@ -110,6 +110,7 @@ class ForcesTrainer(BaseTrainer):
         self.loss_mean=None
         self.loss_moment=0.95
         self.loss_max_percent=3.0
+        self.balance_train_dataset=False
 
     def load_task(self):
         logging.info(f"Loading dataset: {self.config['task']['dataset']}")
@@ -303,6 +304,9 @@ class ForcesTrainer(BaseTrainer):
                 )
 
     def train(self, disable_eval_tqdm=False):
+        
+        self.balance_train_dataset=self.train_dataset.config.get("blance",False)
+        
         ensure_fitted(self._unwrapped_model, warn=True)
 
         eval_every = self.config["optim"].get(
@@ -434,44 +438,55 @@ class ForcesTrainer(BaseTrainer):
                     self.scheduler.step()
 
             torch.cuda.empty_cache()
-            from torch import distributed as dist
-            if dist.is_initialized():
-                world_size=dist.get_world_size()
-                local_rank=dist.get_rank()
-            else:
-                world_size=1
-                local_rank=0
-            if local_rank==0:
-                global_sampler_weight=getattr(self,"__global_sampler_weight",[])
-                import numpy as np
-                global_sampler_weight=np.array(global_sampler_weight)
-                
-                global_sampler_weight[global_sampler_weight<1e-8]=global_sampler_weight.mean()
-                
-                mid_loss=(global_sampler_weight.max()+global_sampler_weight.min())/2
-                width_loss=(global_sampler_weight.max()-global_sampler_weight.min())
-                global_sampler_weight=np.exp(-(global_sampler_weight-mid_loss)**2/(2*(width_loss/2)**2))*global_sampler_weight
-                np.savetxt(f"weight_{epoch_int}.txt",global_sampler_weight)
-                
-                weights=torch.tensor(global_sampler_weight,dtype=torch.float32).cuda()
-                for i in range(1,world_size):
-                    dist.send(weights,i)
-            else:
-                weights=torch.empty(len(self.train_dataset),dtype=torch.float32).to(self.model.device)
-                print(local_rank,weights)
-                dist.recv(weights,0)
-                
-            weights=weights.detach().cpu().numpy()
-            self.train_dataset.config['weight_sample']=weights
-            self.train_sampler = self.get_train_sampler(
-                self.train_dataset,
-                self.config["optim"]["batch_size"],
-                shuffle=True,
-            )
-            self.train_loader = self.get_dataloader(
-                self.train_dataset,
-                self.train_sampler,
-            )    
+            
+            if self.balance_train_dataset:
+                from torch import distributed as dist
+                if dist.is_initialized():
+                    world_size=dist.get_world_size()
+                    local_rank=dist.get_rank()
+                else:
+                    world_size=1
+                    local_rank=0
+                if local_rank==0:
+                    import numpy as np
+                    global_sampler_weight=getattr(self,"__global_sampler_weight",[])
+                    np.savetxt(f"weight_{epoch_int}.txt",global_sampler_weight)
+                    
+                    global_sampler_weight=np.array(global_sampler_weight)
+                    #weight_mean=global_sampler_weight[global_sampler_weight>1e-8].mean()
+                    weight_mean=0.5*(global_sampler_weight[global_sampler_weight>1e-8].max()+global_sampler_weight[global_sampler_weight>1e-8].min())
+                    
+                    global_sampler_weight[global_sampler_weight<1e-6]=weight_mean+1e-6
+                    
+                    # mid_loss=(global_sampler_weight.max()+global_sampler_weight.min())/2
+                    # width_loss=(global_sampler_weight.max()-global_sampler_weight.min())
+                    # global_sampler_weight=np.exp(-(global_sampler_weight-mid_loss)**2/(2*(width_loss/2)**2))*global_sampler_weight
+                    
+                    global_sampler_weight=1.0*(global_sampler_weight>=weight_mean)
+                    print("sample rate=",np.sum(global_sampler_weight)/len(global_sampler_weight))
+                    getattr(self,"__global_sampler_weight",[1e-8]*len(global_sampler_weight))
+                    
+                    
+                    weights=torch.tensor(global_sampler_weight,dtype=torch.float32).cuda()
+                    for i in range(1,world_size):
+                        dist.send(weights,i)
+                else:
+                    weights=torch.empty(len(self.train_dataset),dtype=torch.float32).to(self.model.device)
+                    dist.recv(weights,0)
+                    print(local_rank,weights)
+                    
+                    
+                weights=weights.detach().cpu().numpy()
+                self.train_dataset.config['weight_sample']=weights
+                self.train_sampler = self.get_train_sampler(
+                    self.train_dataset,
+                    self.config["optim"]["batch_size"],
+                    shuffle=True,
+                )
+                self.train_loader = self.get_dataloader(
+                    self.train_dataset,
+                    self.train_sampler,
+                )    
 
             if checkpoint_every == -1:
                 self.save(checkpoint_file="checkpoint.pt", training_state=True)
@@ -579,6 +594,13 @@ class ForcesTrainer(BaseTrainer):
         return out
 
     def _compute_loss(self, out, batch_list,return_dict=False):
+        natoms = torch.cat(
+                            [
+                                batch.natoms.to(self.device)
+                                for batch in batch_list
+                            ]
+                        )
+        
         loss = []
 
         # Energy loss.
@@ -591,9 +613,19 @@ class ForcesTrainer(BaseTrainer):
         if self.normalizer.get("normalize_labels", False):
             energy_target = self.normalizers["target"].norm(energy_target)
         energy_mult = self.config["optim"].get("energy_coefficient", 1)
-        loss.append(
-            energy_mult * self.loss_fn["energy"](out["energy"], energy_target)
-        )
+        
+        if (
+                        self.config["optim"]
+                        .get("loss_energy", "mae")
+                        .startswith("atomwise")
+                    ):
+            loss.append(
+                energy_mult * self.loss_fn["energy"](out["energy"], energy_target,natoms)
+            )
+        else:
+            loss.append(
+                energy_mult * self.loss_fn["energy"](out["energy"], energy_target)
+            )
 
         # Force loss.
         if self.config["model_attributes"].get("regress_forces", True):
@@ -694,59 +726,70 @@ class ForcesTrainer(BaseTrainer):
                             )
                         )
                 else:
-                    loss.append(
+                    if (
+                        self.config["optim"]
+                        .get("loss_force", "mae")
+                        .startswith("atomwise")
+                    ):
+                        loss.append(
                         force_mult
-                        * self.loss_fn["force"](out["forces"], force_target)
+                        * self.loss_fn["force"](out["forces"], force_target,natoms)
                     )
+                    else:
+                        loss.append(
+                            force_mult
+                            * self.loss_fn["force"](out["forces"], force_target)
+                        )
 
 
         #用于接收其他gpu上的数据，实现动态权重。
         from torch_scatter import scatter
-        with torch.no_grad():
-            
-            # print(batch_list[0].natoms)
-            loss_e_per_data=torch.abs(out["energy"]- energy_target)/batch_list[0].natoms
-            loss_f_per_data=torch.norm(
-                        out["forces"] - force_target, p=2, dim=-1
-                    )
-            loss_f_per_data=scatter(loss_f_per_data,batch_list[0].get("batch"))/batch_list[0].natoms
-            loss_per_data=loss_e_per_data*energy_mult#+loss_f_per_data*force_mult
-        
-            from torch import distributed as dist
-            if dist.is_initialized():
-                world_size=dist.get_world_size()
-                local_rank=dist.get_rank()
-            else:
-                world_size=1
-                local_rank=0
-            if local_rank == 0 and self.model.training:
-                all_index=[[]]*world_size
-                all_index[0]=batch_list[0].get("datasetidx")
-                all_loss_per_data=[[]]*world_size
-                all_loss_per_data[0]=loss_per_data
-                for i in range(1,world_size):
-                    all_index[i]=torch.empty_like(all_index[0])
-                    dist.recv(all_index[i],i)
-                    all_loss_per_data[i]=torch.empty_like(all_loss_per_data[0])
-                    dist.recv(all_loss_per_data[i],i)
-                #print(all_index,all_loss_per_data)
-                global_sampler_weight=getattr(self,"__global_sampler_weight",[])
-                if len(global_sampler_weight) == 0:
-                    global_sampler_weight=[1e-9]*len(self.train_dataset)
+        if self.balance_train_dataset:
+            with torch.no_grad():
                 
-                for m in range(len(all_index)):
-                    for i,l in zip(all_index[m],all_loss_per_data[m]):
-                        i,l=(i.item(),l.item())
-                        #print(i,l)
-                        if global_sampler_weight[i] <1e-8:
-                            global_sampler_weight[i]=l
-                        else:
-                            global_sampler_weight[i]=(l+global_sampler_weight[i])/2
-                setattr(self,"__global_sampler_weight",global_sampler_weight)            
-            elif self.model.training:
-                dist.send(batch_list[0].get("datasetidx"),0)
-                dist.send(loss_per_data,0)
+                # print(batch_list[0].natoms)
+                loss_e_per_data=torch.abs(out["energy"]- energy_target)/batch_list[0].natoms
+                loss_f_per_data=torch.norm(
+                            out["forces"] - force_target, p=2, dim=-1
+                        )
+                loss_f_per_data=scatter(loss_f_per_data,batch_list[0].get("batch"))/batch_list[0].natoms
+                loss_per_data=loss_e_per_data*energy_mult#+loss_f_per_data*force_mult
             
+                from torch import distributed as dist
+                if dist.is_initialized():
+                    world_size=dist.get_world_size()
+                    local_rank=dist.get_rank()
+                else:
+                    world_size=1
+                    local_rank=0
+                if local_rank == 0 and self.model.training:
+                    all_index=[[]]*world_size
+                    all_index[0]=batch_list[0].get("datasetidx")
+                    all_loss_per_data=[[]]*world_size
+                    all_loss_per_data[0]=loss_per_data
+                    for i in range(1,world_size):
+                        all_index[i]=torch.empty_like(all_index[0])
+                        dist.recv(all_index[i],i)
+                        all_loss_per_data[i]=torch.empty_like(all_loss_per_data[0])
+                        dist.recv(all_loss_per_data[i],i)
+                    #print(all_index,all_loss_per_data)
+                    global_sampler_weight=getattr(self,"__global_sampler_weight",[])
+                    if len(global_sampler_weight) == 0:
+                        global_sampler_weight=[1e-9]*len(self.train_dataset)
+                    
+                    for m in range(len(all_index)):
+                        for i,l in zip(all_index[m],all_loss_per_data[m]):
+                            i,l=(i.item(),l.item())
+                            #print(i,l)
+                            if global_sampler_weight[i] <1e-8:
+                                global_sampler_weight[i]=l
+                            else:
+                                global_sampler_weight[i]=(l+global_sampler_weight[i])/2
+                    setattr(self,"__global_sampler_weight",global_sampler_weight)            
+                elif self.model.training:
+                    dist.send(batch_list[0].get("datasetidx"),0)
+                    dist.send(loss_per_data,0)
+                
         # Sanity check to make sure the compute graph is correct.
         for lc in loss:
             assert hasattr(lc, "grad_fn")
@@ -758,13 +801,13 @@ class ForcesTrainer(BaseTrainer):
             loss_dict[k]=v.item()
             
         loss = sum(loss)
-        lossf=float(loss.detach().cpu().numpy())
-        if self.loss_mean == None:
-            self.loss_mean=lossf
-        if lossf>self.loss_mean*self.loss_max_percent:
-            loss=loss*self.loss_mean/lossf*self.loss_max_percent
-            lossf=self.loss_mean*self.loss_max_percent
-        self.loss_mean=self.loss_mean*(self.loss_moment)+(lossf-self.loss_mean)*(1.0-self.loss_moment)
+        # lossf=float(loss.detach().cpu().numpy())
+        # if self.loss_mean == None:
+        #     self.loss_mean=lossf
+        # if lossf>self.loss_mean*self.loss_max_percent:
+        #     loss=loss*self.loss_mean/lossf*self.loss_max_percent
+        #     lossf=self.loss_mean*self.loss_max_percent
+        # self.loss_mean=self.loss_mean*(self.loss_moment)+(lossf-self.loss_mean)*(1.0-self.loss_moment)
         if return_dict:
             return loss,loss_dict
         else:

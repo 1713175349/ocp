@@ -20,6 +20,84 @@ class L2MAELoss(nn.Module):
             return torch.sum(dists)
 
 
+class Atomwise_E_L1_Loss(nn.Module):
+    def __init__(self, reduction="mean"):
+        super().__init__()
+        self.reduction = reduction
+        assert reduction in ["mean", "sum"]
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        target: torch.Tensor,
+        natoms: torch.Tensor,
+    ):
+        assert natoms.shape[0] == input.shape[0] == target.shape[0]
+        assert len(natoms.shape) == 1  # (nAtoms, )
+
+        # print("l2 atomwise shapes: ",natoms, input.shape, target.shape)
+        
+        dists = torch.norm(input - target, p=1, dim=-1)
+        loss =   dists / natoms
+
+        if self.reduction == "mean":
+            return torch.mean(loss)
+        elif self.reduction == "sum":
+            return torch.sum(loss)
+        
+class Atomwise_E_L2_Loss(nn.Module):
+    def __init__(self, reduction="mean"):
+        super().__init__()
+        self.reduction = reduction
+        assert reduction in ["mean", "sum"]
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        target: torch.Tensor,
+        natoms: torch.Tensor,
+    ):
+        assert natoms.shape[0] == input.shape[0] == target.shape[0]
+        assert len(natoms.shape) == 1  # (nAtoms, )
+
+        # print("l2 atomwise shapes: ",natoms, input.shape, target.shape)
+        
+        dists = torch.norm(input - target, p=2, dim=-1)
+        loss =   dists / (natoms)
+
+        if self.reduction == "mean":
+            return torch.mean(loss)
+        elif self.reduction == "sum":
+            return torch.sum(loss)
+    
+     
+class RELATE_F_L1Loss(nn.Module):
+    def __init__(self, reduction="mean"):
+        super().__init__()
+        self.reduction = reduction
+        assert reduction in ["mean", "sum"]
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        target: torch.Tensor,
+        # natoms: torch.Tensor,
+    ):
+        # assert natoms.shape[0] == input.shape[0] == target.shape[0]
+        # assert len(natoms.shape) == 1  # (nAtoms, )
+
+        # print("l2 atomwise shapes: ",natoms, input.shape, target.shape)
+        MEAN_FORCE=2.0
+        dists = torch.norm(input - target, p=1, dim=-1)/(torch.norm(target, p=1, dim=-1)+MEAN_FORCE)
+        # loss = natoms * dists
+        loss =dists
+        if self.reduction == "mean":
+            return torch.mean(loss)
+        elif self.reduction == "sum":
+            return torch.sum(loss)
+
+   
+
 class AtomwiseL2Loss(nn.Module):
     def __init__(self, reduction="mean"):
         super().__init__()
@@ -44,6 +122,7 @@ class AtomwiseL2Loss(nn.Module):
             return torch.mean(loss)
         elif self.reduction == "sum":
             return torch.sum(loss)
+
 
 
 class DDPLoss(nn.Module):

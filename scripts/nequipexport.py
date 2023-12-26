@@ -1,7 +1,7 @@
 import torch
 import sys
 from collections import OrderedDict
-checkpoint=torch.load(sys.argv[1])
+checkpoint=torch.load(sys.argv[1],map_location='cpu')
 out=OrderedDict()
 
 module_conut=next(iter(checkpoint["state_dict"])).count("module")

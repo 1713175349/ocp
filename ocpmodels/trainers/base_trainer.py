@@ -506,6 +506,7 @@ class BaseTrainer(ABC):
         self.loss_fn = {}
         self.loss_fn["energy"] = self.config["optim"].get("loss_energy", "mae")
         self.loss_fn["force"] = self.config["optim"].get("loss_force", "mae")
+        from ..modules.loss import Atomwise_E_L2_Loss,Atomwise_E_L1_Loss,RELATE_F_L1Loss
         for loss, loss_name in self.loss_fn.items():
             if loss_name in ["l1", "mae"]:
                 self.loss_fn[loss] = nn.L1Loss()
@@ -515,6 +516,12 @@ class BaseTrainer(ABC):
                 self.loss_fn[loss] = L2MAELoss()
             elif loss_name == "atomwisel2":
                 self.loss_fn[loss] = AtomwiseL2Loss()
+            elif loss_name == "atomwiseel1loss":
+                self.loss_fn[loss] = Atomwise_E_L1_Loss()
+            elif loss_name == "atomwiseel2loss":
+                self.loss_fn[loss] = Atomwise_E_L2_Loss()
+            elif loss_name == "relatel1loss":
+                self.loss_fn[loss] =RELATE_F_L1Loss()
             else:
                 raise NotImplementedError(
                     f"Unknown loss function name: {loss_name}"
@@ -788,6 +795,27 @@ class BaseTrainer(ABC):
     def _compute_loss(self, out, batch_list):
         """Derived classes should implement this function."""
 
+    def log_gradient_statistics(self):
+        if self.logger is not None:
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    grad = param.grad.detach().cpu().numpy()
+                    param0 = param.detach().cpu().numpy()
+                    # calculate the statistics of the gradient and the parameter
+                    log0={}
+                    log0[f"{name}_grad_mean"]=float(np.mean(grad))
+                    log0[f"{name}_grad_std"]=float(np.std(grad))
+                    log0[f"{name}_grad_max"]=float(np.max(grad))
+                    log0[f"{name}_grad_min"]=float(np.min(grad))
+                    log0[f"{name}_grad_norm"]=float(np.linalg.norm(grad)/len(grad))
+                    log0[f"{name}_mean"]=float(np.mean(param0))
+                    log0[f"{name}_std"]=float(np.std(param0))
+                    log0[f"{name}_max"]=float(np.max(param0))
+                    log0[f"{name}_min"]=float(np.min(param0))
+                    log0[f"{name}_norm"]=float(np.linalg.norm(param0)/len(param0))
+                    self.logger.log(log0, step=self.step, split="parameters")
+                    
+    
     def _backward(self, loss):
         self.optimizer.zero_grad()
         loss.backward()
@@ -815,6 +843,8 @@ class BaseTrainer(ABC):
                 self.logger.log(
                     {"grad_norm": grad_norm}, step=self.step, split="train"
                 )
+        if self.step % 10 == 0:
+            self.log_gradient_statistics()
         if self.scaler:
             self.scaler.step(self.optimizer)
             self.scaler.update()

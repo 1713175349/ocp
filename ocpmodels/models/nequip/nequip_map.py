@@ -65,6 +65,70 @@ from ocpmodels.common.utils import (
     radius_graph_pbc,
 )
 
+from nequip.model import builder_utils
+import torch
+from nequip.nn import GraphModuleMixin
+from torch_runstats.scatter import scatter
+
+class EdgewiseEnergySum(GraphModuleMixin, torch.nn.Module):
+    """Sum edgewise energies.
+
+    Includes optional per-species-pair edgewise energy scales.
+    """
+
+
+
+    def __init__(
+        self,
+        num_types: int,
+        r_max:float,
+        min_bond_len={},
+        irreps_in={},
+    ):
+        """Sum edges into nodes."""
+        super().__init__()
+        self._init_irreps(
+            irreps_in=irreps_in,
+            my_irreps_in={AtomicDataDict.EDGE_LENGTH_KEY: f"0e"},
+            irreps_out={AtomicDataDict.PER_ATOM_ENERGY_KEY: "0e"},
+        )
+
+        from nequip.nn.cutoffs import PolynomialCutoff
+        self.cutoff_func=PolynomialCutoff(r_max,6)
+        
+
+        self.per_edge_scales = torch.nn.Parameter(torch.ones(num_types, num_types),requires_grad=False)
+        if isinstance(min_bond_len,dict):
+            for k,v in min_bond_len:
+                type1,type2=[int(i) for i in k.split("-")]
+                self.per_edge_scales[type1,type2]=v
+                self.per_edge_scales[type2,type1]=v
+        else:
+            self.per_edge_scales=torch.nn.Parameter(torch.ones(num_types, num_types)*min_bond_len,requires_grad=False)
+
+        print("per_scale: ",self.per_edge_scales)
+        
+    def forward(self, data: AtomicDataDict.Type) -> AtomicDataDict.Type:
+        edge_length = data[AtomicDataDict.EDGE_LENGTH_KEY]
+        edge_center = data[AtomicDataDict.EDGE_INDEX_KEY][0]
+        edge_neighbor = data[AtomicDataDict.EDGE_INDEX_KEY][1]
+        species = data[AtomicDataDict.ATOM_TYPE_KEY].squeeze(-1)
+        center_species = species[edge_center]
+        neighbor_species = species[edge_neighbor]
+
+        l0=(self.per_edge_scales[
+            center_species, neighbor_species
+        ])
+        
+        edge_eng = torch.pow(edge_length/l0,-12)/24.0*l0*self.cutoff_func(edge_length)
+        edge_eng=edge_eng.unsqueeze(-1)
+        atom_eng = scatter(edge_eng, edge_center, dim=0, dim_size=len(species))
+
+        data[AtomicDataDict.PER_ATOM_ENERGY_KEY] = data[AtomicDataDict.PER_ATOM_ENERGY_KEY]+atom_eng
+
+        return data
+
+
 
 @registry.register_model("nequipmap")
 class NequipWrap(nn.Module):
@@ -90,6 +154,8 @@ class NequipWrap(nn.Module):
         invariant_neurons=64,  # number of hidden neurons in radial function
         use_sc=True,  # use self-connection or not
         cutoff=4.0,
+        add_repulsive=False,
+        min_bond_len={},
         resnet=False,
         regress_forces=False,
         direct_forces=False,
@@ -134,6 +200,7 @@ class NequipWrap(nn.Module):
             "invariant_neurons": invariant_neurons,
             "use_sc": use_sc,
             "avg_num_neighbors": self.ave_num_neighbors,
+            "min_bond_len":min_bond_len,
             **convolution_args,
         }
         from nequip.data.transforms import TypeMapper
@@ -185,6 +252,8 @@ class NequipWrap(nn.Module):
                     out_field=AtomicDataDict.PER_ATOM_ENERGY_KEY,
                 ),
             )
+        if add_repulsive:
+            layers["add_vdw_repusive"]=EdgewiseEnergySum
 
         layers["total_energy_sum"] = (
             AtomwiseReduce,
