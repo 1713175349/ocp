@@ -843,7 +843,7 @@ class BaseTrainer(ABC):
                 self.logger.log(
                     {"grad_norm": grad_norm}, step=self.step, split="train"
                 )
-        if self.step % 10 == 0:
+        if self.step % 100000 == 0:
             self.log_gradient_statistics()
         if self.scaler:
             self.scaler.step(self.optimizer)
